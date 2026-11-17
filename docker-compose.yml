@@ -1,0 +1,71 @@
+# Warren: a tela (app) mais a escuta (tap) que registra as mensagens.
+#
+#   cp .env.example .env
+#   docker compose up -d --build
+#   abra http://localhost:8080 e cadastre os RabbitMQ em Conexões
+#   (com RABBITMQ_* no .env, a primeira conexão é criada a partir deles na subida)
+#
+# A tela mostra o corpo das mensagens, então pede login. Crie o primeiro usuário com
+# WARREN_ADMIN_EMAIL / WARREN_ADMIN_PASSWORD no .env, ou depois de subir:
+#   docker compose exec app php artisan warren:user voce@exemplo.com
+# A porta é publicada só em 127.0.0.1. Para expor, ponha atrás de HTTPS (proxy reverso), defina
+# SESSION_SECURE_COOKIE=true e WARREN_TRUSTED_PROXIES.
+# Nomes e áreas de negócio das filas: veja catalogo/exemplo.json (montado em /app/catalogo).
+
+name: warren
+
+x-warren-env: &warren-env
+    APP_ENV: production
+    APP_DEBUG: "false"
+    APP_URL: ${APP_URL:-http://localhost:8080}
+    LOG_CHANNEL: stderr
+    DB_CONNECTION: sqlite
+    DB_DATABASE: /data/database.sqlite
+    CACHE_STORE: database
+    SESSION_DRIVER: database
+    QUEUE_CONNECTION: sync
+
+services:
+    app:
+        build: .
+        image: warren:local
+        env_file:
+            - path: .env
+              required: false
+        environment:
+            <<: *warren-env
+            RUN_MIGRATIONS: "1"
+        ports:
+            - "127.0.0.1:${PORT:-8080}:8080"
+        volumes:
+            - data:/data
+            - ./catalogo:/app/catalogo:ro
+        # permite que uma conexão em http://host.docker.internal:15672 alcance um broker rodando no host
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        restart: unless-stopped
+
+    tap:
+        image: warren:local
+        command: ["php", "artisan", "warren:tap"]
+        env_file:
+            - path: .env
+              required: false
+        environment:
+            <<: *warren-env
+            RUN_MIGRATIONS: "0"
+        volumes:
+            - data:/data
+            - ./catalogo:/app/catalogo:ro
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        depends_on:
+            app:
+                condition: service_healthy
+        # a imagem checa HTTP na :8080, que este processo não serve
+        healthcheck:
+            disable: true
+        restart: unless-stopped
+
+volumes:
+    data:

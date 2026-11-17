@@ -1,0 +1,60 @@
+# Experimente o Warren sem um broker seu: acrescenta um RabbitMQ descartável e um gerador de tráfego.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+#   abra http://localhost:8080
+#
+# Nunca use este arquivo contra um broker real.
+
+services:
+    rabbitmq:
+        image: rabbitmq:4-management
+        # O rastreio de mensagens vem desligado e não persiste; liga assim que o broker sobe.
+        # As chamadas de CLI rodam como o usuário rabbitmq (gosu): como root, a primeira cria o
+        # .erlang.cookie com dono root e o servidor morre com eacces ao tentar lê-lo.
+        command: >
+            sh -c "(sleep 3; until gosu rabbitmq rabbitmq-diagnostics -q check_running >/dev/null 2>&1; do sleep 2; done; gosu rabbitmq rabbitmqctl -q trace_on) &
+                   exec docker-entrypoint.sh rabbitmq-server"
+        healthcheck:
+            test: ["CMD", "gosu", "rabbitmq", "rabbitmq-diagnostics", "-q", "check_running"]
+            interval: 5s
+            timeout: 5s
+            retries: 30
+
+    demo:
+        image: warren:local
+        command: ["php", "artisan", "warren:demo", "--yes", "--rate=4"]
+        environment: &demo-broker
+            RABBITMQ_URL: http://rabbitmq:15672
+            RABBITMQ_AMQP_HOST: rabbitmq
+            RABBITMQ_USER: guest
+            RABBITMQ_PASSWORD: guest
+            RABBITMQ_VHOST: /
+            APP_ENV: production
+            LOG_CHANNEL: stderr
+        volumes:
+            - data:/data
+        depends_on:
+            rabbitmq:
+                condition: service_healthy
+            app:
+                condition: service_healthy
+        # a imagem checa HTTP na :8080, que este processo não serve
+        healthcheck:
+            disable: true
+        restart: unless-stopped
+
+    app:
+        environment:
+            <<: *demo-broker
+        depends_on:
+            rabbitmq:
+                condition: service_healthy
+
+    tap:
+        environment:
+            <<: *demo-broker
+        depends_on:
+            rabbitmq:
+                condition: service_healthy
+            app:
+                condition: service_healthy

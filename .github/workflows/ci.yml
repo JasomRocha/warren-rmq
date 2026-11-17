@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  php:
+    name: PHP (style + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: sockets, pcntl, pdo_sqlite, mbstring
+          tools: composer:v2
+          coverage: none
+
+      - name: Composer cache
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: cp .env.example .env && php artisan key:generate
+      - name: Code style (Laravel Pint)
+        run: vendor/bin/pint --test
+      - name: Tests
+        run: php artisan test
+
+  frontend:
+    name: Front end (types + tests + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    name: Docker image + smoke test
+    runs-on: ubuntu-latest
+    needs: [php, frontend]
+    env:
+      SMOKE_EMAIL: ci@example.com
+      SMOKE_PASSWORD: ci-password-123
+      PORT: "8080"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: warren:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The demo stack brings its own throwaway RabbitMQ and traffic generator, so this runs the real thing:
+      # web + tap + broker with the message trace on.
+      - name: Start the demo stack
+        run: |
+          printf 'WARREN_ADMIN_EMAIL=%s\nWARREN_ADMIN_PASSWORD=%s\n' "$SMOKE_EMAIL" "$SMOKE_PASSWORD" > .env
+          docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --no-build --wait --wait-timeout 180
+
+      - name: Smoke test
+        run: scripts/smoke.sh http://localhost:8080 --expect-traffic
+
+      - name: Logs (on failure)
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.demo.yml logs --no-color --tail 200
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.demo.yml down -v

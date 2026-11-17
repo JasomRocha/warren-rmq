@@ -1,0 +1,111 @@
+{
+    "categorias": {
+        "pedidos": {
+            "nome": "Pedidos",
+            "descricao": "Tudo que acontece depois que um cliente fecha um pedido.",
+            "cor": "#56b6f2"
+        },
+        "documentos": {
+            "nome": "Geração de documentos",
+            "descricao": "Notas fiscais e relatórios em PDF."
+        },
+        "email": {
+            "nome": "E-mails"
+        }
+    },
+    "instancias": {
+        "remover": [
+            "_minhaempresa_com_br$",
+            "\\.minhaempresa\\.com\\.br$"
+        ],
+        "nomes": {
+            "lojasilva": "Loja Silva & Filhos"
+        }
+    },
+    "filas": [
+        {
+            "padrao": "^pedidos\\.processar\\.aguardando$",
+            "nome": "Processamento de pedidos · aguardando nova tentativa",
+            "categoria": "pedidos",
+            "papel": "espera"
+        },
+        {
+            "padrao": "^pedidos\\.processar\\.falhas$",
+            "nome": "Processamento de pedidos · falhas",
+            "categoria": "pedidos",
+            "papel": "falhas"
+        },
+        {
+            "padrao": "^pedidos\\.processar$",
+            "nome": "Processamento de pedidos",
+            "categoria": "pedidos",
+            "descricao": "Valida o pedido, reserva o estoque e cobra o cliente."
+        },
+        {
+            "padrao": "^nfe_(?<instancia>.+)$",
+            "nome": "Emissão de nota fiscal · {instancia}",
+            "categoria": "documentos",
+            "descricao": "Uma fila por cliente (loja)."
+        },
+        {
+            "padrao": "^relatorio_pdf$",
+            "nome": "Relatórios em PDF",
+            "categoria": "documentos"
+        },
+        {
+            "padrao": "^email\\.",
+            "nome": "Envio de e-mails",
+            "categoria": "email"
+        },
+        {
+            "padrao": "^pedidos\\.resultados$",
+            "nome": "Resultados dos pedidos",
+            "categoria": "pedidos",
+            "papel": "passiva"
+        }
+    ],
+    "vocabulario": {
+        "pdf.gerar": "geração de PDF",
+        "nfe": "nota fiscal"
+    },
+    "paineis": [
+        {
+            "id": "resultados-pedidos",
+            "titulo": "Resultados dos pedidos",
+            "tipo": "resultados",
+            "descricao": "O que o serviço de pedidos avisa ao terminar cada trabalho. Esta fila não tem consumidor de propósito.",
+            "filas": [
+                "^pedidos\\.resultados$"
+            ],
+            "regras": [
+                {
+                    "chave": "^pedidos\\.(?<loja>[^.]+)\\.(?<acao>.+)\\.success$",
+                    "status": "sucesso",
+                    "titulo": "{acao}",
+                    "texto": "Terminou com sucesso: {acao} da loja {loja}.",
+                    "campos": {
+                        "Pedido": "corpo:pedido.id",
+                        "Valor": "corpo:pedido.total"
+                    }
+                },
+                {
+                    "chave": "^pedidos\\.(?<loja>[^.]+)\\.(?<acao>.+)\\.error$",
+                    "status": "erro",
+                    "titulo": "{acao}",
+                    "texto": "Deu erro: {acao} da loja {loja}.",
+                    "campos": {
+                        "Motivo": "corpo:mensagemErro"
+                    }
+                }
+            ]
+        }
+    ],
+    "workers": [
+        {
+            "padrao": "^app-pedidos@(?<host>.+)$",
+            "nome": "Pedidos · {host}",
+            "servico": "Pedidos",
+            "descricao": "Processa os pedidos novos."
+        }
+    ]
+}
